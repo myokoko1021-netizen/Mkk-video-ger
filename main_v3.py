@@ -184,7 +184,7 @@ def mix_audio(voice_path: str, ambient_path: str, out_path: str):
         "ffmpeg", "-y",
         "-i", voice_path, "-i", ambient_path,
         "-filter_complex",
-        "[0:a]volume=1.0[v];[1:a]volume=0.18[a];"
+        "[0:a]volume=1.0[v];[1:a]volume=0.21[a];"
         "[v][a]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[mixed]",
         "-map", "[mixed]",
         "-c:a", "aac", "-b:a", "128k",
