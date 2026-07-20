@@ -32,7 +32,7 @@ WIDTH, HEIGHT = 1080, 1920
 FPS = 24
 VOICE = "en-US-GuyNeural"
 BGM_CACHE_PATH = "/tmp/bgm_pad_cache.mp3"
-BGM_VOLUME = 0.12  # kept low so it never competes with the narration
+BGM_VOLUME = 0.32  # audible but still under the narration
 
 
 class Scene(BaseModel):
@@ -43,6 +43,7 @@ class Scene(BaseModel):
 class VideoRequest(BaseModel):
     scenes: List[Scene]
     voice: str = VOICE
+    part_label: str = ""
 
 
 @app.get("/")
@@ -173,6 +174,34 @@ def build_captions(text: str, duration: float, word_boundaries: list, out_path: 
         f.write("\n".join(lines))
 
 
+def build_title_card(text: str, out_path: str, duration: float = 1.6):
+    """
+    Create a short title-card clip (e.g. "PART 2 / 3") shown at the very
+    start of the video. TikTok's cover-frame timestamp (video_cover_timestamp_ms,
+    set in the n8n Init step) points into this card's duration, so the part
+    number is visible directly in the feed thumbnail before anyone taps play -
+    this is what makes a "Part X" series recognizable at a glance.
+    """
+    escaped_text = text.replace(":", "\\:").replace("'", "\\'")
+    vf = (
+        f"drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+        f"text='{escaped_text}':fontcolor=white:fontsize=100:"
+        f"x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=0x7dd3fc@0.18:boxborderw=34"
+    )
+    run([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"color=c=0x0d0a26:s={WIDTH}x{HEIGHT}:d={duration}:r={FPS}",
+        "-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={duration}",
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "2",
+        "-b:v", "2000k", "-maxrate", "2200k", "-bufsize", "4400k",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "96k",
+        "-shortest",
+        out_path,
+    ])
+
+
 def build_scene_clip(image_path: str, audio_path: str, caption_path: str, duration: float, out_path: str, pattern_index: int):
     """
     Create one scene clip: Ken Burns-style movement + burned karaoke captions
@@ -218,7 +247,12 @@ def build_scene_clip(image_path: str, audio_path: str, caption_path: str, durati
         y_expr = "ih/2-(ih/zoom/2)"
 
     zoompan = (
-        f"scale=-2:{scale_height}:flags=fast_bilinear,"
+        # An explicit `fps` filter right before zoompan fixes a well-known
+        # stutter/jitter artifact that happens when zoompan reads directly
+        # from a looped still image (-loop 1) without consistent frame
+        # timing feeding into it.
+        f"scale=-2:{scale_height}:flags=lanczos,"
+        f"fps={FPS},"
         f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':d={total_frames}:s={WIDTH}x{HEIGHT}:fps={FPS}"
     )
     vf = f"{zoompan},subtitles={caption_path}"
@@ -344,9 +378,7 @@ def ensure_bgm_pad(path: str = BGM_CACHE_PATH) -> str:
 
     filter_parts.append(f"{''.join(chord_labels)}concat=n={len(chords)}:v=0:a=1[progression]")
     filter_parts.append(
-        "[progression]tremolo=f=0.15:d=0.3,"
-        "aecho=0.6:0.5:120:0.3,"
-        "lowpass=f=2600,volume=2.2[out]"
+        "[progression]lowpass=f=2600,volume=2.2[out]"
     )
     filter_complex = ";".join(filter_parts)
 
